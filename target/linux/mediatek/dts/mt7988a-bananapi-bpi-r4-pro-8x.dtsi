@@ -1,0 +1,763 @@
+// SPDX-License-Identifier: (GPL-2.0 OR MIT)
+/*
+ * Copyright (C) 2024 MediaTek Inc.
+ * Copyright (C) 2024 Banana Pi community
+ *
+ * Device tree for the Banana Pi BPI-R4 Pro 8X router board (MT7988A)
+ *
+ * Hardware overview:
+ *   - SoC: MediaTek MT7988A (Filogic 880), Quad Cortex-A73 @ 1.8GHz
+ *   - RAM: 8 GB DDR4 (always 8GB on the 8X variant)
+ *   - Storage: 8 GB eMMC + 256 MB SPI-NAND + microSD
+ *
+ * Network topology:
+ *   - gmac0 -> Internal MT7988A GbE switch (1 port used: lan5)
+ *   - gmac1 (USXGMII_1) -> 10G WAN combo port
+ *       Muxed via GPIO3: Low=RJ45 (AS21010P PHY), High=SFP+ cage
+ *   - gmac2 (USXGMII_0) -> MxL86252C DSA switch CPU uplink (10G fixed-link)
+ *       MxL switch provides:
+ *         - 4x 2.5GbE RJ45 LAN ports (lan1-lan4) via internal PHYs
+ *         - 1x 10G LAN combo port (lan6) via XPCS1 SerDes
+ *           Muxed via GPIO54: Low=SFP+ cage, High=RJ45 (AS21010P PHY)
+ *
+ * Chassis port labels (left to right):
+ *   lan1-lan4 (2.5G MxL), lan5 (1G internal), 10G RJ45 LAN combo,
+ *   10G SFP+ LAN combo, 10G SFP+ WAN combo, 10G RJ45 WAN combo
+ *
+ * Combo port mux control (via UCI gpio_switches, GPIO numbers 515/566):
+ *   GPIO3  (515): WAN combo - Low=RJ45, High=SFP+
+ *   GPIO54 (566): LAN combo - Low=SFP+, High=RJ45
+ */
+
+/dts-v1/;
+
+#include <dt-bindings/gpio/gpio.h>
+#include <dt-bindings/input/input.h>
+#include <dt-bindings/leds/common.h>
+#include <dt-bindings/regulator/richtek,rt5190a-regulator.h>
+
+#include "mt7988a.dtsi"
+
+/ {
+	chosen {
+		stdout-path = "serial0:115200n8";
+		bootargs = "console=ttyS0,115200n1 pci=pcie_bus_perf ubi.block=0,fit root=/dev/fit0";
+		rootdisk-spim-nand = <&ubi_rootfs>;
+	};
+
+	aliases {
+		ethernet0 = &gmac0;
+		ethernet1 = &gmac1;
+		ethernet2 = &gmac2;
+		serial0 = &serial0;
+		/* Blue LED = activity/boot/running/upgrade, Red LED = failsafe only */
+		led-boot = &led_blue;
+		led-failsafe = &led_red;
+		led-running = &led_blue;
+		led-upgrade = &led_blue;
+	};
+
+	/* Default 256MB, U-Boot overrides to actual 8GB at boot */
+	memory@40000000 {
+		reg = <0x00 0x40000000 0x00 0x10000000>;
+		device_type = "memory";
+	};
+
+	fan: pwm-fan {
+		compatible = "pwm-fan";
+		/* cooling level (0, 1, 2, 3) : (0% duty, 30% duty, 50% duty, 100% duty) */
+		cooling-levels = <0 80 128 255>;
+		#cooling-cells = <2>;
+		pwms = <&pwm 0 50000>;
+		status = "okay";
+	};
+
+	reg_1p8v: regulator-1p8v {
+		compatible = "regulator-fixed";
+		regulator-name = "fixed-1.8V";
+		regulator-min-microvolt = <1800000>;
+		regulator-max-microvolt = <1800000>;
+		regulator-boot-on;
+		regulator-always-on;
+	};
+
+	reg_3p3v: regulator-3p3v {
+		compatible = "regulator-fixed";
+		regulator-name = "fixed-3.3V";
+		regulator-min-microvolt = <3300000>;
+		regulator-max-microvolt = <3300000>;
+		regulator-boot-on;
+		regulator-always-on;
+	};
+
+	/*
+	 * SFP1 cage (WAN side)
+	 * Connected to gmac1 (USXGMII_1), shared with AS21010P WAN PHY.
+	 * GPIO3 mux selects between SFP+ (High) and RJ45 (Low).
+	 * TX_FAULT and RATE_SELECT are not connected on this board.
+	 */
+	sfp1: sfp1 {
+		compatible = "sff,sfp";
+		i2c-bus = <&i2c_sfp1>;
+		los-gpios = <&pio 70 GPIO_ACTIVE_HIGH>;
+		mod-def0-gpios = <&pio 69 GPIO_ACTIVE_LOW>;
+		tx-disable-gpios = <&pio 21 GPIO_ACTIVE_HIGH>;
+		maximum-power-milliwatt = <3000>;
+	};
+
+	/*
+	 * SFP2 cage (LAN side)
+	 * Connected to MxL86252C XPCS1 SerDes (port@13), shared with AS21010P LAN PHY.
+	 * GPIO54 mux selects between SFP+ (Low) and RJ45 (High).
+	 * TX_FAULT and RATE_SELECT are not connected on this board.
+	 */
+	sfp2: sfp2 {
+		compatible = "sff,sfp";
+		i2c-bus = <&i2c_sfp2>;
+		los-gpios = <&pio 2 GPIO_ACTIVE_HIGH>;
+		mod-def0-gpios = <&pio 1 GPIO_ACTIVE_LOW>;
+		tx-disable-gpios = <&pio 0 GPIO_ACTIVE_HIGH>;
+		maximum-power-milliwatt = <3000>;
+	};
+
+	gpio-keys {
+		compatible = "gpio-keys";
+
+		reset {
+			label = "reset";
+			linux,code = <KEY_RESTART>;
+			gpios = <&pio 13 GPIO_ACTIVE_LOW>;
+		};
+
+		wps {
+			label = "WPS";
+			linux,code = <KEY_WPS_BUTTON>;
+			gpios = <&pio 14 GPIO_ACTIVE_LOW>;
+		};
+	};
+
+	/*
+	 * Board status LEDs on PCA9555 GPIO expander (I2C mux ch0, addr 0x20).
+	 * Active high polarity (verified on hardware).
+	 * Green power LED is hardwired (always on, not controllable).
+	 */
+	gpio-leds {
+		compatible = "gpio-leds";
+
+		led_blue: led-blue {
+			function = LED_FUNCTION_ACTIVITY;
+			color = <LED_COLOR_ID_BLUE>;
+			gpios = <&gpio_exp 14 GPIO_ACTIVE_HIGH>;
+			default-state = "off";
+		};
+
+		led_red: led-red {
+			function = LED_FUNCTION_FAULT;
+			color = <LED_COLOR_ID_RED>;
+			gpios = <&gpio_exp 15 GPIO_ACTIVE_HIGH>;
+			default-state = "off";
+		};
+	};
+};
+
+/* CPU voltage scaling - RT5190A PMIC BUCK3 */
+&cpu0 {
+	proc-supply = <&rt5190_buck3>;
+};
+
+&cpu1 {
+	proc-supply = <&rt5190_buck3>;
+};
+
+&cpu2 {
+	proc-supply = <&rt5190_buck3>;
+};
+
+&cpu3 {
+	proc-supply = <&rt5190_buck3>;
+};
+
+&cci {
+	proc-supply = <&rt5190_buck3>;
+};
+
+/*
+ * Thermal management - 3 active cooling levels + PWM fan.
+ * Trips and cooling-maps must be defined here because the base
+ * mt7988a.dtsi only provides the critical trip; board-specific
+ * active cooling trips are added per-board.
+ */
+&cpu_thermal {
+	trips {
+		cpu_trip_active_high: active-high {
+			temperature = <115000>;
+			hysteresis = <2000>;
+			type = "active";
+		};
+
+		cpu_trip_active_med: active-med {
+			temperature = <85000>;
+			hysteresis = <2000>;
+			type = "active";
+		};
+
+		cpu_trip_active_low: active-low {
+			temperature = <40000>;
+			hysteresis = <2000>;
+			type = "active";
+		};
+	};
+
+	cooling-maps {
+		map-cpu-active-high {
+			/* active: set fan to cooling level 3 */
+			cooling-device = <&fan 3 3>;
+			trip = <&cpu_trip_active_high>;
+		};
+
+		map-cpu-active-med {
+			/* active: set fan to cooling level 2 */
+			cooling-device = <&fan 2 2>;
+			trip = <&cpu_trip_active_med>;
+		};
+
+		map-cpu-active-low {
+			/* active: set fan to cooling level 1 */
+			cooling-device = <&fan 1 1>;
+			trip = <&cpu_trip_active_low>;
+		};
+	};
+};
+
+&eth {
+	status = "okay";
+};
+
+/* gmac0 - conduit for internal MT7988A GbE switch (lan5) */
+&gmac0 {
+	status = "okay";
+};
+
+/*
+ * gmac1 (USXGMII_1) - WAN 10G combo port
+ * Default mode: RJ45 via AS21010P PHY at MDIO address 0x1c.
+ * SFP+ mode available by toggling GPIO3 high (via UCI gpio_switch).
+ * In-band status used for auto-negotiation (supports 10G/5G/2.5G/1G).
+ */
+&gmac1 {
+	phy-handle = <&as21xx_wan>;
+	managed = "in-band-status";
+	phy-mode = "usxgmii";
+	openwrt,netdev-name = "wan";
+	status = "okay";
+};
+
+/*
+ * gmac2 (USXGMII_0) - MxL86252C DSA switch CPU uplink
+ * Fixed 10Gbps link to the switch's XPCS0 SerDes (port@9).
+ */
+&gmac2 {
+	phy-mode = "usxgmii";
+	status = "okay";
+
+	fixed-link {
+		speed = <10000>;
+		full-duplex;
+	};
+};
+
+/*
+ * Internal MT7988A GbE switch - only port 0 is used on R4 Pro 8X.
+ * Chassis label: "1Gbps LAN 5"
+ * Single amber LED (led0) for link/activity (hardware-controlled by PHY).
+ * Green LED (led1) is not connected on this board (marked X on schematic).
+ */
+&switch {
+	status = "okay";
+};
+
+&gsw_phy0 {
+	pinctrl-names = "gbe-led";
+	pinctrl-0 = <&gbe0_led0_pins>;
+};
+
+&gsw_port0 {
+	label = "lan5";
+};
+
+/* lan5 amber LED - hardware controlled, pin 64 on MT7988A */
+&gsw_phy0_led0 {
+	status = "okay";
+	function = LED_FUNCTION_LAN;
+	color = <LED_COLOR_ID_AMBER>;
+};
+
+/*
+ * MaxLinear MxL86252C 2.5GbE DSA switch
+ *
+ * MDIO bus 0 at address 0x10 (GPIO5=MDC, GPIO6=MDIO).
+ * Reset on GPIO4.
+ * Separate DSA tree (tree 1) since internal MT7530 uses tree 0.
+ *
+ * Port numbering: the MxL862xx driver uses 1-based DSA port indices
+ * with separate MDIO PHY addresses (0-based). Each port needs an
+ * explicit phy-handle referencing the switch's internal MDIO bus.
+ *
+ * SerDes ports: XPCS0 = port 9, XPCS1 = port 13 (per driver code
+ * in pending patch 760-11). Only ports 9 and 13 are valid SerDes
+ * entry points.
+ */
+&mdio_bus {
+	mxl_switch: switch@10 {
+		compatible = "maxlinear,mxl86252";
+		reg = <0x10>;
+		dsa,member = <1 0>;
+		reset-gpios = <&pio 4 GPIO_ACTIVE_LOW>;
+		reset-assert-us = <10000>;
+		reset-deassert-us = <50000>;
+
+		/* Internal MDIO bus for MxL86252C built-in 2.5G PHYs */
+		mdio {
+			#address-cells = <1>;
+			#size-cells = <0>;
+
+			mxl_phy0: ethernet-phy@0 {
+				reg = <0>;
+			};
+
+			mxl_phy1: ethernet-phy@1 {
+				reg = <1>;
+			};
+
+			mxl_phy2: ethernet-phy@2 {
+				reg = <2>;
+			};
+
+			mxl_phy3: ethernet-phy@3 {
+				reg = <3>;
+			};
+		};
+
+		ethernet-ports {
+			#address-cells = <1>;
+			#size-cells = <0>;
+
+			/* Chassis: "2.5Gbps LAN 1" */
+			port@1 {
+				reg = <1>;
+				label = "lan1";
+				phy-handle = <&mxl_phy0>;
+				phy-mode = "internal";
+			};
+
+			/* Chassis: "2.5Gbps LAN 2" */
+			port@2 {
+				reg = <2>;
+				label = "lan2";
+				phy-handle = <&mxl_phy1>;
+				phy-mode = "internal";
+			};
+
+			/* Chassis: "2.5Gbps LAN 3" */
+			port@3 {
+				reg = <3>;
+				label = "lan3";
+				phy-handle = <&mxl_phy2>;
+				phy-mode = "internal";
+			};
+
+			/* Chassis: "2.5Gbps LAN 4" */
+			port@4 {
+				reg = <4>;
+				label = "lan4";
+				phy-handle = <&mxl_phy3>;
+				phy-mode = "internal";
+			};
+
+			/*
+			 * CPU port - XPCS0 SerDes uplink to gmac2 (USXGMII_0)
+			 * 10Gbps fixed-link to MT7988A.
+			 */
+			port@9 {
+				reg = <9>;
+				label = "cpu";
+				ethernet = <&gmac2>;
+				phy-mode = "usxgmii";
+
+				fixed-link {
+					speed = <10000>;
+					full-duplex;
+				};
+			};
+
+			/*
+			 * Second SerDes port (XPCS1) - 10G LAN combo
+			 * Chassis: "10Gbps RJ45 LAN combo" / "10Gbps SFP+ LAN combo"
+			 * Muxed via GPIO54: Low=SFP+, High=RJ45 (AS21010P)
+			 * Default: RJ45 mode (GPIO54=High, set by UCI gpio_switch)
+			 */
+			port@13 {
+				reg = <13>;
+				label = "lan6";
+				phy-mode = "usxgmii";
+				phy-handle = <&as21xx_lan>;
+				managed = "in-band-status";
+			};
+		};
+	};
+
+	/*
+	 * Aeonsemi AS21010P 10G PHYs for combo RJ45/SFP+ ports.
+	 * Both on MDIO bus 0. Clause 45 PHYs requiring firmware load.
+	 * Firmware file: /lib/firmware/as21x1x_fw.bin
+	 * Reset takes ~1 second (reset-deassert-us = 1000000).
+	 *
+	 * LED mapping (verified on hardware - colors are swapped vs datasheet):
+	 *   led@0 = Green (link indicator)
+	 *   led@1 = Amber (activity indicator)
+	 * LEDs default to off; software triggers in 01_leds activate them.
+	 */
+	as21xx_wan: ethernet-phy@1c {
+		compatible = "ethernet-phy-ieee802.3-c45";
+		reg = <0x1c>;
+		firmware-name = "as21x1x_fw.bin";
+		reset-deassert-us = <1000000>;
+		reset-assert-us = <1000000>;
+		reset-gpios = <&pio 82 GPIO_ACTIVE_LOW>;
+
+		leds {
+			#address-cells = <1>;
+			#size-cells = <0>;
+
+			led@0 {
+				reg = <0>;
+				color = <LED_COLOR_ID_GREEN>;
+				function = LED_FUNCTION_WAN;
+				default-state = "off";
+			};
+
+			led@1 {
+				reg = <1>;
+				color = <LED_COLOR_ID_AMBER>;
+				function = LED_FUNCTION_WAN;
+				default-state = "off";
+			};
+		};
+	};
+
+	as21xx_lan: ethernet-phy@18 {
+		compatible = "ethernet-phy-ieee802.3-c45";
+		reg = <0x18>;
+		firmware-name = "as21x1x_fw.bin";
+		reset-deassert-us = <1000000>;
+		reset-assert-us = <1000000>;
+		reset-gpios = <&pio 83 GPIO_ACTIVE_LOW>;
+
+		leds {
+			#address-cells = <1>;
+			#size-cells = <0>;
+
+			led@0 {
+				reg = <0>;
+				color = <LED_COLOR_ID_GREEN>;
+				function = LED_FUNCTION_LAN;
+				default-state = "off";
+			};
+
+			led@1 {
+				reg = <1>;
+				color = <LED_COLOR_ID_AMBER>;
+				function = LED_FUNCTION_LAN;
+				default-state = "off";
+			};
+		};
+	};
+};
+
+/* RT5190A PMIC on I2C bus 0 */
+&i2c0 {
+	pinctrl-names = "default";
+	pinctrl-0 = <&i2c0_pins>;
+	status = "okay";
+
+	rt5190a_64: rt5190a@64 {
+		compatible = "richtek,rt5190a";
+		reg = <0x64>;
+		vin2-supply = <&rt5190_buck1>;
+		vin3-supply = <&rt5190_buck1>;
+		vin4-supply = <&rt5190_buck1>;
+
+		regulators {
+			rt5190_buck1: BUCK1 {
+				regulator-name = "rt5190a-buck1";
+				regulator-min-microvolt = <5090000>;
+				regulator-max-microvolt = <5090000>;
+				regulator-always-on;
+				regulator-boot-on;
+			};
+
+			BUCK2 {
+				regulator-name = "vcore";
+				regulator-min-microvolt = <600000>;
+				regulator-max-microvolt = <1400000>;
+				regulator-boot-on;
+				regulator-always-on;
+			};
+
+			rt5190_buck3: BUCK3 {
+				regulator-name = "proc";
+				regulator-min-microvolt = <600000>;
+				regulator-max-microvolt = <1400000>;
+				regulator-boot-on;
+				regulator-always-on;
+			};
+
+			BUCK4 {
+				regulator-name = "rt5190a-buck4";
+				regulator-min-microvolt = <850000>;
+				regulator-max-microvolt = <850000>;
+				regulator-always-on;
+				regulator-boot-on;
+			};
+
+			LDO {
+				regulator-name = "rt5190a-ldo";
+				regulator-min-microvolt = <1200000>;
+				regulator-max-microvolt = <1200000>;
+				regulator-always-on;
+				regulator-boot-on;
+			};
+		};
+	};
+};
+
+/*
+ * I2C mux (PCA9545) on I2C bus 2, address 0x70 (GPIO71=SCL, GPIO72=SDA).
+ * 4 channels:
+ *   Ch0 (i2c-3): RTC PCF8563 @ 0x50, EEPROM AT24C02 @ 0x57,
+ *                PCA9555 GPIO expander @ 0x20 (board LEDs)
+ *   Ch1 (i2c-4): SFP1 WAN cage I2C
+ *   Ch2 (i2c-5): SFP2 LAN cage I2C
+ *   Ch3 (i2c-6): WiFi EEPROM @ 0x51 (BPI-R4-NIC-BE14 module)
+ */
+&i2c2 {
+	pinctrl-names = "default";
+	pinctrl-0 = <&i2c2_1_pins>;
+	status = "okay";
+
+	pca9545: pca9545@70 {
+		compatible = "nxp,pca9545";
+		reg = <0x70>;
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		/* Channel 0: RTC, EEPROM, GPIO expander */
+		i2c@0 {
+			#address-cells = <1>;
+			#size-cells = <0>;
+			reg = <0>;
+
+			/* RTC - enabled via mt7988a-bananapi-bpi-r4-pro-8x-rtc.dtso overlay */
+			pcf8563: pcf8563@50 {
+				compatible = "nxp,pcf8563";
+				reg = <0x50>;
+				status = "disabled";
+			};
+
+			eeprom@57 {
+				compatible = "atmel,24c02";
+				reg = <0x57>;
+				size = <256>;
+				pagesize = <8>;
+			};
+
+			/* PCA9555 GPIO expander - drives board blue/red status LEDs */
+			gpio_exp: pca9555@20 {
+				compatible = "nxp,pca9555";
+				reg = <0x20>;
+				gpio-controller;
+				#gpio-cells = <2>;
+			};
+		};
+
+		/* Channel 1: SFP1 WAN cage */
+		i2c_sfp1: i2c@1 {
+			#address-cells = <1>;
+			#size-cells = <0>;
+			reg = <1>;
+		};
+
+		/* Channel 2: SFP2 LAN cage */
+		i2c_sfp2: i2c@2 {
+			#address-cells = <1>;
+			#size-cells = <0>;
+			reg = <2>;
+		};
+
+		/* Channel 3: WiFi module EEPROM (BPI-R4-NIC-BE14 @ 0x51) */
+		i2c_wifi: i2c@3 {
+			#address-cells = <1>;
+			#size-cells = <0>;
+			reg = <3>;
+			status = "disabled";
+		};
+	};
+};
+
+/* PCIe controllers - all 4 enabled for WiFi, NVMe, and 5G modem slots */
+&pcie0 {
+	status = "okay";
+};
+
+&pcie1 {
+	status = "okay";
+};
+
+/*
+ * WiFi 7 MT7996 (BPI-R4-NIC-BE14) on pcie2 — W2G + W5G LEDs
+ * TODO: WiFi chassis LEDs (W2G pin 46, W5G pin 42) are driven by
+ * the MT7996 chip's LED controller. PCI OF node matching doesn't
+ * work on MT7988A, so LEDs can't be configured via DTS yet.
+ */
+&pcie2 {
+	status = "okay";
+};
+
+/*
+ * WiFi 7 MT7996 HIF (BPI-R4-NIC-BE14) on pcie3 — W6G LED
+ * TODO: Same OF node matching issue as pcie2.
+ */
+&pcie3 {
+	status = "okay";
+};
+
+/*
+ * Pin controller - defines pin groups used by peripherals.
+ * I2C and LED pin groups must be defined here because the base
+ * mt7988a.dtsi references them but they were moved to per-board
+ * DTS by patch 170.
+ */
+&pio {
+	i2c0_pins: i2c0-g0-pins {
+		mux {
+			function = "i2c";
+			groups = "i2c0_1";
+		};
+	};
+
+	i2c2_1_pins: i2c2-g1-pins {
+		mux {
+			function = "i2c";
+			groups = "i2c2_1";
+		};
+	};
+
+	/* lan5 amber LED - pin 64 on MT7988A */
+	gbe0_led0_pins: gbe0-led0-pins {
+		mux {
+			function = "led";
+			groups = "gbe0_led0";
+		};
+	};
+
+	i2p5gbe_led0_pins: 2p5gbe-led0-pins {
+		mux {
+			function = "led";
+			groups = "2p5gbe_led0";
+		};
+	};
+
+	mmc0_pins_emmc_51: mmc0-emmc-51-pins {
+		mux {
+			function = "flash";
+			groups = "emmc_51";
+		};
+	};
+
+	mmc0_pins_sdcard: mmc0-sdcard-pins {
+		mux {
+			function = "flash";
+			groups = "sdcard";
+		};
+	};
+
+	spi0_flash_pins: spi0-flash-pins {
+		mux {
+			function = "spi";
+			groups = "spi0", "spi0_wp_hold";
+		};
+	};
+};
+
+&pwm {
+	status = "okay";
+};
+
+&serial0 {
+	status = "okay";
+};
+
+/* SPI-NAND flash - 256MB with BL2 + UBI partitions */
+&snand {
+	pinctrl-names = "default";
+	pinctrl-0 = <&spi0_flash_pins>;
+	status = "okay";
+
+	flash@0 {
+		compatible = "spi-nand";
+		reg = <0>;
+		spi-max-frequency = <52000000>;
+		spi-tx-bus-width = <4>;
+		spi-rx-bus-width = <4>;
+
+		partitions {
+			compatible = "fixed-partitions";
+			#address-cells = <1>;
+			#size-cells = <1>;
+
+			partition@0 {
+				label = "bl2";
+				reg = <0x0 0x200000>;
+				read-only;
+			};
+
+			partition@200000 {
+				label = "ubi";
+				reg = <0x200000 0x7e00000>;
+				compatible = "linux,ubi";
+
+				volumes {
+					ubi-volume-ubootenv {
+						volname = "ubootenv";
+						nvmem-layout {
+							compatible = "u-boot,env-redundant-bool-layout";
+						};
+					};
+
+					ubi-volume-ubootenv2 {
+						volname = "ubootenv2";
+						nvmem-layout {
+							compatible = "u-boot,env-redundant-bool-layout";
+						};
+					};
+
+					ubi_rootfs: ubi-volume-fit {
+						volname = "fit";
+					};
+				};
+			};
+		};
+	};
+};
+
+&ssusb1 {
+	status = "okay";
+};
+
+&tphy {
+	status = "okay";
+};
+
+&watchdog {
+	status = "okay";
+};

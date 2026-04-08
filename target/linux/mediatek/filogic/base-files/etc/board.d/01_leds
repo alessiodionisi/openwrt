@@ -59,6 +59,13 @@ bananapi,bpi-r4-poe)
 	ucidef_set_led_netdev "lan2" "lan2" "mt7530-0:02:green:lan" "lan2" "link tx rx"
 	ucidef_set_led_netdev "lan3" "lan3" "mt7530-0:03:green:lan" "lan3" "link tx rx"
 	;;
+bananapi,bpi-r4-pro-8x)
+	ucidef_set_led_netdev "lan5-amber" "lan5" "mt7530-0:00:amber:lan" "lan5" "link tx rx"
+	ucidef_set_led_netdev "wan-green" "wan-link" "mdio-bus:1c:green:wan" "wan" "link"
+	ucidef_set_led_netdev "wan-amber" "wan-activity" "mdio-bus:1c:amber:wan" "wan" "tx rx"
+	ucidef_set_led_netdev "lan6-green" "lan6-link" "mdio-bus:18:green:lan" "lan6" "link"
+	ucidef_set_led_netdev "lan6-amber" "lan6-activity" "mdio-bus:18:amber:lan" "lan6" "tx rx"
+	;;
 bananapi,bpi-r4-lite)
 	ucidef_set_led_netdev "sfp0" "sfp0" "green:sfp" "sfp0" "link tx rx"
 	;;

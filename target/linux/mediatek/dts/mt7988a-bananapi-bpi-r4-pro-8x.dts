@@ -1,0 +1,15 @@
+// SPDX-License-Identifier: (GPL-2.0 OR MIT)
+/*
+ * Copyright (C) 2024 MediaTek Inc.
+ * Copyright (C) 2024 Banana Pi community
+ * Device tree for the Banana Pi BPI-R4 Pro 8X router board
+ */
+
+/dts-v1/;
+#include "mt7988a-bananapi-bpi-r4-pro-8x.dtsi"
+
+/ {
+	compatible = "bananapi,bpi-r4-pro-8x", "mediatek,mt7988a";
+	model = "Banana Pi BPI-R4 Pro 8X";
+	chassis-type = "embedded";
+};
