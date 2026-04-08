@@ -1,0 +1,11 @@
+--- a/drivers/net/phy/as21xxx.c
++++ b/drivers/net/phy/as21xxx.c
+@@ -920,6 +920,8 @@
+ 	linkmode_set_bit(ETHTOOL_LINK_MODE_10000baseT_Full_BIT,
+ 			 phydev->supported);
+
++	linkmode_set_bit(ETHTOOL_LINK_MODE_Autoneg_BIT,
++			 phydev->supported);
+ 	/* AS21xxx does not support C22 registers */
+ 	phydev->c45_ids.devices_in_package &= ~BIT(0);
+

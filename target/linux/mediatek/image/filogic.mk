@@ -722,6 +722,33 @@ define Device/bananapi_bpi-r4-poe
 endef
 TARGET_DEVICES += bananapi_bpi-r4-poe
 
+define Device/bananapi_bpi-r4-pro-8x
+  DEVICE_MODEL := BPi-R4 Pro 8X
+  DEVICE_DTS := mt7988a-bananapi-bpi-r4-pro-8x
+  DEVICE_DTS_CONFIG := config-mt7988a-bananapi-bpi-r4
+  $(call Device/bananapi_bpi-r4-common)
+  DEVICE_PACKAGES += kmod-gpio-pca953x kmod-phy-aquantia kmod-phy-bcm84881 \
+		     kmod-phy-marvell-10g ethtool-full i2c-tools
+  ARTIFACT/emmc-preloader.bin	:= mt7988-bl2 emmc-comb-4bg
+  ARTIFACT/snand-preloader.bin	:= mt7988-bl2 spim-nand-ubi-comb-4bg
+  ARTIFACT/sdcard.img.gz	:= mt798x-gpt sdmmc |\
+			   pad-to 17k | mt7988-bl2 sdmmc-comb-4bg |\
+			   pad-to 6656k | mt7988-bl31-uboot $$(DEVICE_NAME)-sdmmc |\
+			$(if $(CONFIG_TARGET_ROOTFS_INITRAMFS),\
+			   pad-to 12M | append-image-stage initramfs-recovery.itb | check-size 44m |\
+			) \
+			   pad-to 44M | mt7988-bl2 spim-nand-ubi-comb-4bg |\
+			   pad-to 45M | mt7988-bl31-uboot $$(DEVICE_NAME)-snand |\
+			   pad-to 51M | mt7988-bl2 emmc-comb-4bg |\
+			   pad-to 52M | mt7988-bl31-uboot $$(DEVICE_NAME)-emmc |\
+			   pad-to 56M | mt798x-gpt emmc |\
+			$(if $(CONFIG_TARGET_ROOTFS_SQUASHFS),\
+			   pad-to 64M | append-image squashfs-sysupgrade.itb | check-size |\
+			) \
+			  gzip
+endef
+TARGET_DEVICES += bananapi_bpi-r4-pro-8x
+
 define Device/bananapi_bpi-r4-lite
   DEVICE_VENDOR := Bananapi
   DEVICE_MODEL := BPi-R4 Lite
