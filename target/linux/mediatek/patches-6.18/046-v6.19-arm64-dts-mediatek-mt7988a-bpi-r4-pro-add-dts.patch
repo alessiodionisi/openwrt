@@ -275,7 +275,7 @@ Signed-off-by: AngeloGioacchino Del Regno <angelogioacchino.delregno@collabora.c
 +};
 +
 +&gsw_port0 {
-+	label = "mgmt";
++	label = "lan5";
 +};
 +
 +/* R4Pro has only port 0 connected, so disable the others */
