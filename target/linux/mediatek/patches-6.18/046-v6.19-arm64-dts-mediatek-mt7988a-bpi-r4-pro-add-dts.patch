@@ -39,8 +39,8 @@ Signed-off-by: Frank Wunderlich <frank-w@public-files.de>
 Signed-off-by: AngeloGioacchino Del Regno <angelogioacchino.delregno@collabora.com>
 ---
  .../mt7988a-bananapi-bpi-r4-pro-8x.dts        |  16 +
- .../mediatek/mt7988a-bananapi-bpi-r4-pro.dtsi | 534 ++++++++++++++++++
- 2 files changed, 550 insertions(+), 0 deletions(-)
+ .../mediatek/mt7988a-bananapi-bpi-r4-pro.dtsi | 527 ++++++++++++++++++
+ 2 files changed, 543 insertions(+), 0 deletions(-)
  create mode 100644 arch/arm64/boot/dts/mediatek/mt7988a-bananapi-bpi-r4-pro-8x.dts
  create mode 100644 arch/arm64/boot/dts/mediatek/mt7988a-bananapi-bpi-r4-pro.dtsi
 
@@ -65,7 +65,7 @@ Signed-off-by: AngeloGioacchino Del Regno <angelogioacchino.delregno@collabora.c
 +};
 --- /dev/null
 +++ b/arch/arm64/boot/dts/mediatek/mt7988a-bananapi-bpi-r4-pro.dtsi
-@@ -0,0 +1,534 @@
+@@ -0,0 +1,527 @@
 +// SPDX-License-Identifier: (GPL-2.0 OR MIT)
 +/*
 + * Copyright (C) 2025 MediaTek Inc.
@@ -250,13 +250,6 @@ Signed-off-by: AngeloGioacchino Del Regno <angelogioacchino.delregno@collabora.c
 +&eth {
 +	pinctrl-0 = <&mdio0_pins>;
 +	pinctrl-names = "default";
-+	status = "okay";
-+};
-+
-+&fan {
-+	pinctrl-0 = <&pwm0_pins>;
-+	pinctrl-names = "default";
-+	pwms = <&pwm 0 50000>;
 +	status = "okay";
 +};
 +
